@@ -48,8 +48,28 @@ MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP = 0x0008, 0x0010
 MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP = 0x0020, 0x0040
 
 WM_HOTKEY = 0x0312
+WM_KEYDOWN = 0x0100
+WH_KEYBOARD_LL = 13
 MOD_NOREPEAT = 0x4000
-VK_F9, VK_F10, VK_F11 = 0x78, 0x79, 0x7A
+VK_F9, VK_F10 = 0x78, 0x79
+VK_ESCAPE = 0x1B
+
+# 修饰键统一用左侧虚拟键码（"同时按下键盘"勾选左右都执行左键）
+VK_MOD = {"ctrl": 0xA2, "shift": 0xA0, "alt": 0xA4, "win": 0x5B}
+
+
+class KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [("vkCode", wintypes.DWORD), ("scanCode", wintypes.DWORD),
+                ("flags", wintypes.DWORD), ("time", wintypes.DWORD),
+                ("dwExtraInfo", ULONG_PTR)]
+
+
+def mod_down(name):
+    key_down(VK_MOD[name])
+
+
+def mod_up(name):
+    key_up(VK_MOD[name])
 
 
 def _send(*units):
@@ -125,16 +145,71 @@ def type_text(text, interval=0.012):
         time.sleep(interval)
 
 
-def start_hotkeys(event_queue):
-    """注册全局热键并在后台线程监听。
+def exec_actions(actions, stop):
+    """按顺序执行解析后的动作元组列表，stop 置位时中止。
+    返回 True 表示全部执行完成。"""
+    for act in actions:
+        if stop.is_set():
+            return False
+        kind = act[0]
+        if kind == "move":
+            move_to(act[1], act[2])
+        elif kind == "click":
+            for _ in range(act[2]):
+                if stop.is_set():
+                    return False
+                click(act[1])
+        elif kind == "down":
+            mouse_down(act[1])
+        elif kind == "up":
+            mouse_up(act[1])
+        elif kind == "mod":
+            (mod_down if act[2] == "down" else mod_up)(act[1])
+        elif kind == "key":
+            (key_down if act[2] == "down" else key_up)(act[1])
+        elif kind == "wait":
+            end = time.time() + act[1] / 1000.0
+            while time.time() < end and not stop.is_set():
+                time.sleep(0.02)
+        elif kind == "type":
+            type_text(act[1])
+    return True
 
-    F9=新建脚本  F10=运行  F11=停止
-    热键触发时向 event_queue 投递 ("hotkey", "f9"/"f10"/"f11")。
+
+def start_hotkeys(event_queue, esc_taps=3, esc_window=1.2):
+    """注册全局热键并监听 Esc 快速连按，在后台线程运行。
+
+    F9=打开脚本编辑  F10=运行/停止（由主程序根据状态切换）
+    Esc 快速连按 esc_taps 次（esc_window 秒内）→ 投递 ("hotkey", "esc_exit")
+    强制退出整个软件。低级键盘钩子只观察不拦截，不影响其他软件使用 Esc。
+    热键触发/连按触发时向 event_queue 投递 ("hotkey", "f9"/"f10"/"esc_exit")。
     """
     def loop():
-        ids = {1: ("f9", VK_F9), 2: ("f10", VK_F10), 3: ("f11", VK_F11)}
+        ids = {1: ("f9", VK_F9), 2: ("f10", VK_F10)}
         for i, (_, vk) in ids.items():
             user32.RegisterHotKey(None, i, MOD_NOREPEAT, vk)
+
+        # 低级键盘钩子：Esc 连按检测（仅观察，CallNextHookEx 放行）
+        taps = []
+        HOOKPROC = ctypes.WINFUNCTYPE(
+            ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM,
+            ctypes.POINTER(KBDLLHOOKSTRUCT))
+
+        def proc(ncode, wparam, lparam):
+            if ncode == 0 and wparam == WM_KEYDOWN \
+                    and lparam.contents.vkCode == VK_ESCAPE:
+                now = time.time()
+                taps[:] = [t for t in taps if now - t < esc_window]
+                taps.append(now)
+                if len(taps) >= esc_taps:
+                    taps.clear()
+                    event_queue.put(("hotkey", "esc_exit"))
+            return user32.CallNextHookEx(None, ncode, wparam, lparam)
+
+        global _esc_hook_cb
+        _esc_hook_cb = HOOKPROC(proc)          # 持有引用防止被垃圾回收
+        user32.SetWindowsHookExW(WH_KEYBOARD_LL, _esc_hook_cb, None, 0)
+
         msg = wintypes.MSG()
         try:
             while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
@@ -149,3 +224,6 @@ def start_hotkeys(event_queue):
     t = threading.Thread(target=loop, daemon=True)
     t.start()
     return t
+
+
+_esc_hook_cb = None

@@ -17,16 +17,17 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import scriptfmt
 import sim
 import license_client
+import editor
 
 APP_TITLE = "鼠标脚本工具"
 # 水印：标题栏与激活窗口统一带作者标识
 APP_TITLE_LABELED = "鼠标脚本工具 by 西塔 | ptyo7o2"
-ABOUT_TEXT = "鼠标脚本工具 v1.0\n\n作者：西塔\n联系方式：ptyo7o2"
+ABOUT_TEXT = "鼠标脚本工具 v1.1\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
 
 # 程序目录：打包成 exe 后取 exe 所在目录，脚本状态下取 py 文件目录
 if getattr(sys, "frozen", False):
@@ -40,20 +41,8 @@ COLOR_KEYS = ("black", "red", "green")
 COLOR_FG = {"black": "#333333", "red": "#E53935", "green": "#0B8A3C"}
 COLOR_NAMES = {"black": "默认黑", "red": "红色(账号)", "green": "绿色(密码)"}
 
-TEMPLATE = """\
-# 鼠标脚本模板 —— 在下面写指令，保存后回到软件点"导入"
-# 可用指令（# 开头是注释，空行忽略）：
-#   移到 134,87     鼠标移动到坐标
-#   左键点击        单击左键（另有 右键点击 / 左键双击）
-#   等待 200        等 200 毫秒
-#   输入 你的账号    输入一串文字（支持中文）
-# 用法：运行前先把光标点进目标输入框，再按 F10
-输入 """
 
-COL_TPL = """\
-# {name} —— 鼠标脚本模板，改好保存后回软件点"导入"
-# 可用指令：移到 x,y / 左键点击 / 右键点击 / 左键双击 / 等待 毫秒 / 输入 文字
-输入 """
+
 
 
 class App:
@@ -126,6 +115,7 @@ class App:
                                    command=lambda k=key: self.set_color(self._menu_index, k))
         self.menu.add_cascade(label="颜色", menu=color_menu)
         self.menu.add_command(label="⚙ 编辑脚本", command=lambda: self.edit_script(self._menu_index))
+        self.menu.add_command(label="✏ 重命名", command=lambda: self.rename_item(self._menu_index))
         self.menu.add_command(label="📂 打开所在文件夹", command=lambda: self.open_folder(self._menu_index))
         self.menu.add_command(label="📄 复制内容到剪贴板", command=lambda: self.copy_item(self._menu_index))
         self.menu.add_separator()
@@ -241,8 +231,40 @@ class App:
             self._save_config()
 
     def edit_script(self, index):
-        if 0 <= index < len(self.items):
-            os.startfile(self.items[index]["path"])
+        """右键「编辑脚本」：优先用脚本编辑窗口打开（编辑保存直接覆盖原文件）。"""
+        if not (0 <= index < len(self.items)):
+            return
+        editor.ScriptEditor(self.root, on_saved=self._on_editor_saved,
+                            source_path=self.items[index]["path"],
+                            scripts_dir=SCRIPTS_DIR)
+
+    def rename_item(self, index):
+        """重命名：列表显示与磁盘文件一起改。"""
+        if not (0 <= index < len(self.items)):
+            return
+        it = self.items[index]
+        new = simpledialog.askstring("重命名", "新的脚本名称：",
+                                     initialvalue=it["name"], parent=self.root)
+        if not new or not new.strip():
+            return
+        new_name = "".join(c for c in new.strip() if c not in '\\/:*?"<>|')
+        ext = os.path.splitext(it["path"])[1] or ".txt"
+        new_path = os.path.join(os.path.dirname(it["path"]), new_name + ext)
+        if new_path == it["path"]:
+            return
+        if os.path.exists(new_path):
+            messagebox.showwarning("重命名", "同名脚本已存在，请换一个名字")
+            return
+        try:
+            os.rename(it["path"], new_path)
+        except OSError as e:
+            messagebox.showerror("重命名", f"重命名失败：{e}")
+            return
+        it["path"] = new_path
+        it["name"] = new_name
+        self._refresh_tree()
+        self._save_config()
+        self._set_status(f"已重命名为「{new_name}」")
 
     def open_folder(self, index):
         if 0 <= index < len(self.items):
@@ -261,12 +283,23 @@ class App:
         self._set_status(f"已复制「{it['name']}」的内容到剪贴板（{len(text)} 字）— 去 Ctrl+V 粘贴")
 
     def on_new_script(self):
-        os.makedirs(SCRIPTS_DIR, exist_ok=True)
-        path = os.path.join(SCRIPTS_DIR, f"新脚本-{time.strftime('%Y%m%d%H%M%S')}.txt")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(COL_TPL.format(name=os.path.basename(path)))
-        os.startfile(path)   # 默认文本编辑器打开
-        self._set_status("已新建脚本模板并打开编辑器，改完保存后点「导入」")
+        """F9 /「创建鼠标宏」：打开脚本编辑窗口（点添加、弹框填参数做脚本）。"""
+        editor.ScriptEditor(self.root, on_saved=self._on_editor_saved,
+                            scripts_dir=SCRIPTS_DIR)
+
+    def _on_editor_saved(self, path):
+        """编辑器保存后刷新主界面列表：已有则更新名称，否则新增。"""
+        path = os.path.normpath(path)
+        for it in self.items:
+            if it["path"] == path:
+                it["name"] = os.path.splitext(os.path.basename(path))[0]
+                break
+        else:
+            self.items.append({"path": path,
+                               "name": os.path.splitext(os.path.basename(path))[0],
+                               "color": "black", "checked": True})
+        self._refresh_tree()
+        self._save_config()
 
     # ---------- 运行 ----------
     def on_run(self):
@@ -293,12 +326,12 @@ class App:
 
         self.stop_flag.clear()
         self.running = True
-        self.run_btn.state(["disabled"])
+        self.run_btn.configure(text="⏹ 停止(F10)")
         threading.Thread(target=self._worker, args=(scripts, count), daemon=True).start()
 
     def _worker(self, scripts, count):
         stop = self.stop_flag
-        self.events.put(("status", "运行中… 按 F11 可随时停止"))
+        self.events.put(("status", "运行中… 再按一次 F10 停止"))
         total = 0
         try:
             round_no = 0
@@ -307,10 +340,8 @@ class App:
                 for name, actions, errors in scripts:
                     if stop.is_set():
                         return
-                    for act in actions:
-                        if stop.is_set():
-                            return
-                        self._exec(act, stop)
+                    if not sim.exec_actions(actions, stop):
+                        return
                     if errors:
                         self.events.put(("status", f"「{name}」有 {len(errors)} 行未识别被跳过"))
                     total += 1
@@ -323,32 +354,18 @@ class App:
         finally:
             self.events.put(("done", "已停止" if stop.is_set() else "运行完成"))
 
-    def _exec(self, act, stop):
-        kind = act[0]
-        if kind == "move":
-            sim.move_to(act[1], act[2])
-        elif kind == "click":
-            for _ in range(act[2]):
-                if stop.is_set():
-                    return
-                sim.click(act[1])
-        elif kind == "down":
-            sim.mouse_down(act[1])
-        elif kind == "up":
-            sim.mouse_up(act[1])
-        elif kind == "key":
-            (sim.key_down if act[2] == "down" else sim.key_up)(act[1])
-        elif kind == "wait":
-            end = time.time() + act[1] / 1000.0
-            while time.time() < end and not stop.is_set():
-                time.sleep(0.02)
-        elif kind == "type":
-            sim.type_text(act[1])
-
     def on_stop(self):
         if self.running:
             self.stop_flag.set()
             self._set_status("正在停止…")
+
+    def _force_exit(self):
+        """Esc 快速三连：强制退出整个软件，运行中的脚本一并终止。"""
+        self.stop_flag.set()
+        try:
+            self.root.destroy()
+        finally:
+            os._exit(0)
 
     # ---------- 配置 ----------
     def _load_config(self):
@@ -380,14 +397,18 @@ class App:
                     if payload == "f9":
                         self.on_new_script()
                     elif payload == "f10":
-                        self.on_run()
-                    elif payload == "f11":
-                        self.on_stop()
+                        if self.running:
+                            self.on_stop()
+                        else:
+                            self.on_run()
+                    elif payload == "esc_exit":
+                        self._force_exit()
                 elif kind == "status":
                     self._set_status(payload)
                 elif kind == "done":
                     self.running = False
                     self.run_btn.state(["!disabled"])
+                    self.run_btn.configure(text="运行鼠标宏(F10)")
                     self._set_status(payload + " — 就绪")
         except queue.Empty:
             pass

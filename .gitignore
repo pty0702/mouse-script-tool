@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+
+# PyInstaller 产物
+build/
+dist/
+*.spec
+
+# 打包成 exe 后运行时生成
+config.json
+脚本/
+
+# 大体积安装包不入库
+*.exe
+
+# 工作过程临时目录
+artifacts/tmp/

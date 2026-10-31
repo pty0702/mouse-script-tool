@@ -24,6 +24,7 @@ BUTTON_CN = {"left": "鼠标左键", "right": "鼠标右键", "middle": "鼠标�
 BUTTONS = {"鼠标左键": "left", "鼠标中键": "middle", "鼠标右键": "right"}
 ACTION_CN = {"click": "单击(按下+松开)", "down": "按下", "up": "松开", "double": "双击"}
 ACTIONS = {"click": "click", "down": "down", "up": "up", "double": "double"}
+ACTION_BY_CN = {v: k for k, v in ACTION_CN.items()}   # 下拉框中文显示 → 内部值
 
 # 左侧操作列表：分组 → (显示名, kind, button, action)
 OP_GROUPS = [
@@ -76,9 +77,18 @@ def _num(value, default=None):
         return default
 
 
-def pick_position(parent):
-    """全屏半透明取坐标：移动鼠标实时显示坐标，单击取位，Esc 取消。"""
+def pick_position(parent, hide=()):
+    """全屏半透明取坐标：先把 hide 里的窗口藏起来（避免挡住目标位置），
+    移动鼠标实时显示坐标，单击取位，Esc 取消；结束时恢复窗口。"""
     result = {"pos": None}
+    hidden = []
+    for w in hide:
+        try:
+            if w.winfo_viewable():
+                w.withdraw()
+                hidden.append(w)
+        except tk.TclError:
+            pass
     ov = tk.Toplevel(parent)
     ov.overrideredirect(True)
     ov.geometry(f"{ov.winfo_screenwidth()}x{ov.winfo_screenheight()}+0+0")
@@ -103,8 +113,15 @@ def pick_position(parent):
     ov.bind("<Button-1>", on_click)
     ov.bind("<Escape>", lambda e: ov.destroy())
     ov.focus_force()
-    ov.grab_set()
-    parent.wait_window(ov)
+    try:
+        ov.grab_set()
+        parent.wait_window(ov)
+    finally:
+        for w in hidden:
+            try:
+                w.deiconify()
+            except tk.TclError:
+                pass
     return result["pos"]
 
 
@@ -267,7 +284,9 @@ class ScriptEditor(tk.Toplevel):
         ttk.Entry(row, textvariable=y_var, width=8).pack(side="left", padx=6)
 
         def do_pick():
-            pos = pick_position(dlg)
+            # 选取期间隐藏对话框、编辑器与主窗口，避免挡住要选的位置
+            pos = pick_position(dlg, hide=(dlg, self, self.master))
+            dlg.grab_set()   # 选完恢复对话框的模态
             if pos:
                 x_var.set(str(pos[0]))
                 y_var.set(str(pos[1]))
@@ -327,7 +346,7 @@ class ScriptEditor(tk.Toplevel):
         tk.Label(row, text="  鼠标按键").pack(side="left")
         a_var = tk.StringVar(value=ACTION_CN[action])
         ttk.Combobox(row, textvariable=a_var, width=14, state="readonly",
-                     values=list(ACTIONS)).pack(side="left", padx=6)
+                     values=list(ACTION_CN.values())).pack(side="left", padx=6)
 
         row2 = tk.Frame(body)
         row2.pack(fill="x", pady=4)
@@ -350,7 +369,8 @@ class ScriptEditor(tk.Toplevel):
 
         def on_ok():
             dlg.result = {"kind": "click", "button": BUTTONS[b_var.get()],
-                          "action": ACTIONS[a_var.get()], "mods": _mods_selected(mod_vars),
+                          "action": ACTION_BY_CN[a_var.get()],
+                          "mods": _mods_selected(mod_vars),
                           "times": max(0, _num(times.get(), 1)),
                           "delay": max(0, _num(delay.get(), 30))}
             dlg.destroy()
@@ -375,7 +395,7 @@ class ScriptEditor(tk.Toplevel):
         tk.Label(row1, text="  键盘动作").pack(side="left")
         a_var = tk.StringVar(value="单击(按下+松开)")
         ttk.Combobox(row1, textvariable=a_var, width=14, state="readonly",
-                     values=list(ACTIONS)).pack(side="left", padx=6)
+                     values=list(ACTION_CN.values())).pack(side="left", padx=6)
 
         row2 = tk.Frame(body)
         row2.pack(fill="x", pady=4)
@@ -416,7 +436,7 @@ class ScriptEditor(tk.Toplevel):
                 messagebox.showwarning("键盘点击", "请先点进「键盘按键」框，直接按下一个键", parent=dlg)
                 return
             dlg.result = {"kind": "keypress", "key": key,
-                          "action": ACTIONS[a_var.get()], "mods": _mods_selected(mod_vars),
+                          "action": ACTION_BY_CN[a_var.get()], "mods": _mods_selected(mod_vars),
                           "times": max(0, _num(times.get(), 1)),
                           "delay": max(0, _num(delay.get(), 30))}
             dlg.destroy()

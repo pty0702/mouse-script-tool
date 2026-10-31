@@ -21,8 +21,12 @@ from tkinter import filedialog, messagebox, ttk
 
 import scriptfmt
 import sim
+import license_client
 
 APP_TITLE = "鼠标脚本工具"
+# 水印：标题栏与激活窗口统一带作者标识
+APP_TITLE_LABELED = "鼠标脚本工具 by 西塔 | ptyo7o2"
+ABOUT_TEXT = "鼠标脚本工具 v1.0\n\n作者：西塔\n联系方式：ptyo7o2"
 
 # 程序目录：打包成 exe 后取 exe 所在目录，脚本状态下取 py 文件目录
 if getattr(sys, "frozen", False):
@@ -55,7 +59,7 @@ COL_TPL = """\
 class App:
     def __init__(self, root):
         self.root = root
-        root.title(APP_TITLE)
+        root.title(APP_TITLE_LABELED)
         root.geometry("860x520")
         root.minsize(720, 420)
 
@@ -129,6 +133,8 @@ class App:
         self.menu.add_command(label="↓ 下移", command=lambda: self.move_item(self._menu_index, 1))
         self.menu.add_separator()
         self.menu.add_command(label="🗑 从列表移除", command=lambda: self.remove_item(self._menu_index))
+        self.menu.add_separator()
+        self.menu.add_command(label="关于", command=lambda: messagebox.showinfo(APP_TITLE_LABELED, ABOUT_TEXT))
 
         bottom = ttk.Frame(self.root, padding=(8, 4, 8, 8))
         bottom.pack(fill="x", side="bottom")
@@ -397,6 +403,11 @@ class App:
 
 def main():
     root = tk.Tk()
+    root.withdraw()
+    if not license_client.gate(root, os.path.join(BASE_DIR, "license.json")):
+        root.destroy()
+        return
+    root.deiconify()
     App(root)
     root.mainloop()
 

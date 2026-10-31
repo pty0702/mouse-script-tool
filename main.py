@@ -27,7 +27,7 @@ import editor
 APP_TITLE = "鼠标脚本工具"
 # 水印：标题栏与激活窗口统一带作者标识
 APP_TITLE_LABELED = "鼠标脚本工具 by 西塔 | ptyo7o2"
-ABOUT_TEXT = "鼠标脚本工具 v1.5\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
+ABOUT_TEXT = "鼠标脚本工具 v1.6\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
 
 # 程序目录：打包成 exe 后取 exe 所在目录，脚本状态下取 py 文件目录
 if getattr(sys, "frozen", False):
@@ -79,7 +79,7 @@ class App:
                         font=("微软雅黑", 10), padding=(14, 6))
         style.map("Blue.TButton",
                   background=[("disabled", "#93B8F5"), ("active", "#2F6FE0")])
-        style.configure("Treeview", font=("微软雅黑", 9), rowheight=28)
+        style.configure("Treeview", font=("微软雅黑", 9), rowheight=32)
         style.configure("Treeview.Heading", font=("微软雅黑", 9, "bold"))
         self.root.option_add("*Font", ("微软雅黑", 9))
 
@@ -94,7 +94,7 @@ class App:
         top_master = ttk.Frame(self.root, padding=(8, 0))
         self.tree = ttk.Treeview(top_master, columns=columns, show="headings",
                                  selectmode="none")
-        headings = [("chk", "☑", 50, "center"), ("name", "脚本名称", 220, "w"),
+        headings = [("chk", "选择", 58, "center"), ("name", "脚本名称", 220, "w"),
                     ("path", "文件路径", 340, "w"), ("ops", "操作", 170, "center")]
         for col, text, width, anchor in headings:
             self.tree.heading(col, text=text)
@@ -153,7 +153,7 @@ class App:
         self.tree.delete(*self.tree.get_children())
         for i, it in enumerate(self.items):
             self.tree.insert("", "end", iid=str(i), values=(
-                "☑" if it["checked"] else "☐",
+                "✅" if it["checked"] else "⬜",
                 it["name"], it["path"], "⚙   🗑   📂   📄"),
                 tags=(it["color"],))
 

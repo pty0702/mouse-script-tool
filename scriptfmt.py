@@ -19,6 +19,8 @@
   ("click", button, times)    点击 button=left/right/middle
   ("down", button) / ("up", button)
   ("mod", name, phase)        修饰键 name=ctrl/shift/alt/win，phase=down/up
+  ("keypress", name, phase)   键盘点击 name=键名（回车/Tab/空格/a/5…），
+                              phase=click(单击)/down/up
   ("wait", ms)                等待毫秒
   ("type", text)              输入一串文字
   ("key", vk, phase)          原始按键 phase=down/up，vk 为虚拟键码（qfwjb）
@@ -44,6 +46,9 @@ _P_KEY = re.compile(r"^键盘.+?键(按下|抬起|松开)[：:]\s*(\d+)\s*$")
 
 # 修饰键（编辑器"同时按下键盘"生成）：按下 ctrl / 松开 shift
 _P_MOD = re.compile(r"^(按下|松开)\s*[：:]?\s*(ctrl|shift|alt|win)\s*$", re.IGNORECASE)
+
+# 键盘点击（编辑器"键盘点击"生成）：按键 回车 / 按下 Tab / 松开 Tab
+_P_KEYNAME = re.compile(r"^(?:按键|按下|松开)\s*[：:]?\s*(\S+)\s*$")
 
 # qfwjb 的按下/抬起行带坐标后缀，如 "鼠标左键按下：0,0"，坐标忽略
 _P_MOUSE_DOWN = re.compile(r"^(?:鼠标)?(左键|右键|中键)按下\s*[：:]?\s*(?:-?\d+\s*[，,]\s*-?\d+\s*)?$")
@@ -89,6 +94,12 @@ def parse_line(line):
     if m:
         return [("mod", m.group(2).lower(), "down" if m.group(1) == "按下" else "up")]
 
+    m = _P_KEYNAME.match(s)
+    if m:
+        word = s[:2]
+        phase = {"按键": "click", "按下": "down", "松开": "up"}[word]
+        return [("keypress", m.group(1), phase)]
+
     m = _P_KEY.match(s)
     if m:
         phase = "down" if m.group(1) == "按下" else "up"
@@ -132,6 +143,7 @@ def extract_copy_text(actions, raw):
 
 _BUTTON_CN = {"left": "左键", "right": "右键", "middle": "中键"}
 _CLICK_CN = {"click": "点击", "double": "双击", "down": "按下", "up": "松开"}
+_KEYPRESS_CN = {"click": "单击", "double": "双击", "down": "按下", "up": "松开"}
 
 
 def serialize_editor_actions(actions):
@@ -141,6 +153,7 @@ def serialize_editor_actions(actions):
       {"kind": "move", "x", "y", "delay"}
       {"kind": "wait", "ms"}
       {"kind": "click", "button", "action", "mods", "times", "delay"}
+      {"kind": "keypress", "key", "action", "mods", "times", "delay"}
       {"kind": "mod", "name", "phase"}
       {"kind": "type", "text", "times", "delay"}
     """
@@ -165,6 +178,23 @@ def serialize_editor_actions(actions):
                     lines.append(f"松开 {m}")
                 if int(a.get("delay", 0)) > 0:
                     lines.append(f"等待 {int(a['delay'])}")
+        elif kind == "keypress":
+            for _ in range(max(1, int(a.get("times", 1)))):
+                for m in a.get("mods", []):
+                    lines.append(f"按下 {m}")
+                if a["action"] == "click":
+                    lines.append(f"按键 {a['key']}")
+                elif a["action"] == "down":
+                    lines.append(f"按下 {a['key']}")
+                elif a["action"] == "up":
+                    lines.append(f"松开 {a['key']}")
+                else:  # double
+                    lines.append(f"按键 {a['key']}")
+                    lines.append(f"按键 {a['key']}")
+                for m in reversed(a.get("mods", [])):
+                    lines.append(f"松开 {m}")
+                if int(a.get("delay", 0)) > 0:
+                    lines.append(f"等待 {int(a['delay'])}")
         elif kind == "type":
             for _ in range(max(1, int(a.get("times", 1)))):
                 lines.append(f"输入 {a['text']}")
@@ -184,16 +214,25 @@ def to_editor_actions(parsed):
         a = parsed[i]
         kind = a[0]
         if kind == "mod" and a[2] == "down":
-            # 连续的"按下 X"向后看：紧跟点击 → 合并为"同时按下键盘"；否则保留独立
+            # 连续的"按下 X"向后看：紧跟点击/按键 → 合并为"同时按下键盘"；否则保留独立
             downs = [a[1]]
             j = i + 1
             while j < n and parsed[j][0] == "mod" and parsed[j][2] == "down":
                 downs.append(parsed[j][1])
                 j += 1
-            if j < n and parsed[j][0] == "click":
-                out.append({"kind": "click", "button": parsed[j][1],
-                            "action": "double" if parsed[j][2] >= 2 else "click",
-                            "mods": downs, "times": 1, "delay": 0})
+            following = parsed[j] if j < n else None
+            absorbable = following is not None and (
+                (following[0] == "click")
+                or (following[0] == "keypress" and following[2] == "click"))
+            if absorbable:
+                if following[0] == "click":
+                    out.append({"kind": "click", "button": following[1],
+                                "action": "double" if following[2] >= 2 else "click",
+                                "mods": downs, "times": 1, "delay": 0})
+                else:
+                    out.append({"kind": "keypress", "key": following[1],
+                                "action": "click", "mods": downs,
+                                "times": 1, "delay": 0})
                 absorbed = downs.copy()
                 i = j + 1
                 while i < n and parsed[i][0] == "mod" and parsed[i][2] == "up" \
@@ -207,6 +246,9 @@ def to_editor_actions(parsed):
             continue
         if kind == "mod":
             out.append({"kind": "mod", "name": a[1], "phase": a[2]})
+        elif kind == "keypress":
+            out.append({"kind": "keypress", "key": a[1], "action": a[2],
+                        "mods": [], "times": 1, "delay": 0})
         elif kind == "click":
             out.append({"kind": "click", "button": a[1],
                         "action": "double" if a[2] >= 2 else "click",
@@ -222,7 +264,7 @@ def to_editor_actions(parsed):
         elif kind == "type":
             out.append({"kind": "type", "text": a[1], "times": 1, "delay": 0})
         elif kind == "wait":
-            if out and out[-1]["kind"] in ("move", "click", "type") \
+            if out and out[-1]["kind"] in ("move", "click", "keypress", "type") \
                     and out[-1].get("delay") == 0:
                 out[-1]["delay"] = a[1]      # 合并回前一动作的延迟
             else:

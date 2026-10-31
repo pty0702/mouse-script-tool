@@ -16,6 +16,7 @@ import scriptfmt
 import sim
 
 MOD_CHOICES = ["左Ctrl", "右Ctrl", "左Shift", "右Shift", "左Alt", "右Alt", "左Win", "右Win"]
+_KEY_PLACEHOLDER = "直接按下键盘按键"
 MOD_TO_NAME = {"左Ctrl": "ctrl", "右Ctrl": "ctrl", "左Shift": "shift", "右Shift": "shift",
                "左Alt": "alt", "右Alt": "alt", "左Win": "win", "右Win": "win"}
 MOD_CN = {"ctrl": "Ctrl", "shift": "Shift", "alt": "Alt", "win": "Win"}
@@ -24,22 +25,48 @@ BUTTONS = {"鼠标左键": "left", "鼠标中键": "middle", "鼠标右键": "ri
 ACTION_CN = {"click": "单击(按下+松开)", "down": "按下", "up": "松开", "double": "双击"}
 ACTIONS = {"click": "click", "down": "down", "up": "up", "double": "double"}
 
-# 左侧操作列表：(显示名, kind, button, action)
-OP_LIST = [
-    ("鼠标移动到", "move", None, None),
-    ("等待", "wait", None, None),
-    ("鼠标右键点击", "click", "right", "click"),
-    ("鼠标右键按下", "click", "right", "down"),
-    ("鼠标右键松开", "click", "right", "up"),
-    ("鼠标左键点击", "click", "left", "click"),
-    ("鼠标左键按下", "click", "left", "down"),
-    ("鼠标左键松开", "click", "left", "up"),
-    ("鼠标左键双击", "click", "left", "double"),
-    ("鼠标中键点击", "click", "middle", "click"),
-    ("鼠标中键按下", "click", "middle", "down"),
-    ("鼠标中键松开", "click", "middle", "up"),
-    ("输入文字", "type", None, None),
+# 左侧操作列表：分组 → (显示名, kind, button, action)
+OP_GROUPS = [
+    ("鼠标操作", [
+        ("鼠标移动到", "move", None, None),
+        ("等待", "wait", None, None),
+        ("鼠标右键点击", "click", "right", "click"),
+        ("鼠标右键按下", "click", "right", "down"),
+        ("鼠标右键松开", "click", "right", "up"),
+        ("鼠标左键点击", "click", "left", "click"),
+        ("鼠标左键按下", "click", "left", "down"),
+        ("鼠标左键松开", "click", "left", "up"),
+        ("鼠标左键双击", "click", "left", "double"),
+        ("鼠标中键点击", "click", "middle", "click"),
+        ("鼠标中键按下", "click", "middle", "down"),
+        ("鼠标中键松开", "click", "middle", "up"),
+    ]),
+    ("键盘操作", [
+        ("键盘点击", "keypress", None, None),
+        ("输入文字", "type", None, None),
+    ]),
 ]
+
+# 编辑器捕获的按键名（keysym → 脚本键名），修饰键本身不捕获
+_KEYSYM_MAP = {
+    "Return": "回车", "Tab": "Tab", "space": "空格", "BackSpace": "退格",
+    "Delete": "删除", "Escape": "Esc", "Up": "上", "Down": "下",
+    "Left": "左", "Right": "右", "Home": "Home", "End": "End",
+    "Prior": "上翻页", "Next": "下翻页",
+}
+
+
+def keysym_to_name(ks):
+    """tkinter keysym → 脚本键名；不认识的（修饰键等）返回 None。"""
+    if ks in _KEYSYM_MAP:
+        return _KEYSYM_MAP[ks]
+    if ks.startswith("KP_") and ks[3:].isdigit():
+        return "小键盘" + ks[3:]
+    if len(ks) == 1 and ks.isalnum():
+        return ks
+    if len(ks) > 1 and ks[0] == "F" and ks[1:].isdigit():
+        return ks      # F1 ~ F12
+    return None
 
 
 def _num(value, default=None):
@@ -97,6 +124,26 @@ def _make_dialog(parent, title, tip):
     return dlg, body, btn_row
 
 
+def _mods_grid(parent, start_row=0):
+    """"同时按下键盘" 4 行 2 列复选框（照参考软件布局），返回 {名称: StringVar}。"""
+    grid = tk.Frame(parent)
+    grid.pack(side="left", padx=8)
+    mod_vars = {}
+    for r, pair in enumerate([("左Ctrl", "右Ctrl"), ("左Shift", "右Shift"),
+                              ("左Alt", "右Alt"), ("左Win", "右Win")]):
+        for c, name in enumerate(pair):
+            v = tk.StringVar(value="0")
+            ttk.Checkbutton(grid, text=name, variable=v,
+                            onvalue="1", offvalue="0").grid(
+                row=r, column=c, sticky="w", padx=8, pady=1)
+            mod_vars[name] = v
+    return grid, mod_vars
+
+
+def _mods_selected(mod_vars):
+    return [MOD_TO_NAME[n] for n in MOD_CHOICES if mod_vars[n].get() == "1"]
+
+
 class ScriptEditor(tk.Toplevel):
     """脚本编辑窗口。on_saved(path) 在保存后回调主界面。"""
 
@@ -120,16 +167,30 @@ class ScriptEditor(tk.Toplevel):
 
     # ---------- 界面 ----------
     def _build_left(self):
-        left = ttk.LabelFrame(self, text=" 鼠标操作 ", padding=(6, 4))
+        left = tk.Frame(self, width=210)
         left.pack(side="left", fill="y", padx=(8, 4), pady=8)
-        for name, kind, button, action in OP_LIST:
-            row = tk.Frame(left)
-            row.pack(fill="x", pady=1)
-            icon = "🖱" if kind != "type" else "⌨"
-            tk.Label(row, text=f"{icon} {name}", font=("微软雅黑", 9)).pack(side="left")
-            ttk.Button(row, text="添加", width=5,
-                       command=lambda k=kind, b=button, a=action:
-                       self._add_action(k, b, a)).pack(side="right")
+        left.pack_propagate(False)
+        canvas = tk.Canvas(left, highlightthickness=0, width=196)
+        sb = ttk.Scrollbar(left, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas)
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw", width=190)
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        for group_name, items in OP_GROUPS:
+            tk.Label(inner, text=group_name, fg="#3B82F6",
+                     font=("微软雅黑", 9, "bold")).pack(anchor="w", pady=(8, 2))
+            for name, kind, button, action in items:
+                row = tk.Frame(inner)
+                row.pack(fill="x", pady=1)
+                icon = "🖱" if kind in ("move", "wait", "click") else "⌨"
+                tk.Label(row, text=f"{icon} {name}",
+                         font=("微软雅黑", 9)).pack(side="left")
+                ttk.Button(row, text="添加", width=5,
+                           command=lambda k=kind, b=button, a=action:
+                           self._add_action(k, b, a)).pack(side="right")
 
     def _build_right(self):
         right = tk.Frame(self)
@@ -187,6 +248,8 @@ class ScriptEditor(tk.Toplevel):
             dlg = self._dialog_wait()
         elif kind == "click":
             dlg = self._dialog_click(button, action)
+        elif kind == "keypress":
+            dlg = self._dialog_keypress()
         else:
             dlg = self._dialog_type()
         if dlg is not None:
@@ -269,12 +332,7 @@ class ScriptEditor(tk.Toplevel):
         row2 = tk.Frame(body)
         row2.pack(fill="x", pady=4)
         tk.Label(row2, text="同时按下键盘").pack(side="left")
-        mod_vars = {}
-        for i, name in enumerate(MOD_CHOICES):
-            v = tk.StringVar(value="0")
-            ttk.Checkbutton(row2, text=name, variable=v, onvalue="1", offvalue="0").pack(
-                side="left", padx=(0, 2))
-            mod_vars[name] = v
+        _, mod_vars = _mods_grid(row2)
 
         row3 = tk.Frame(body)
         row3.pack(fill="x", pady=6)
@@ -291,9 +349,74 @@ class ScriptEditor(tk.Toplevel):
         tk.Label(row4, text=" 毫秒后执行下一个动作; (1000毫秒等于1秒)").pack(side="left")
 
         def on_ok():
-            mods = [MOD_TO_NAME[n] for n in MOD_CHOICES if mod_vars[n].get() == "1"]
             dlg.result = {"kind": "click", "button": BUTTONS[b_var.get()],
-                          "action": ACTIONS[a_var.get()], "mods": mods,
+                          "action": ACTIONS[a_var.get()], "mods": _mods_selected(mod_vars),
+                          "times": max(0, _num(times.get(), 1)),
+                          "delay": max(0, _num(delay.get(), 30))}
+            dlg.destroy()
+
+        ttk.Button(btn_row, text="取消", command=dlg.destroy).pack(side="right", padx=6)
+        ttk.Button(btn_row, text="确定", style="Blue.TButton",
+                   command=on_ok).pack(side="right", padx=6)
+        dlg.result = None
+        self.wait_window(dlg)
+        return dlg.result
+
+    def _dialog_keypress(self):
+        dlg, body, btn_row = _make_dialog(
+            self, "键盘点击", "模拟键盘单击、按住、抬起等点击动作")
+        row1 = tk.Frame(body)
+        row1.pack(fill="x", pady=6)
+        tk.Label(row1, text="键盘按键").pack(side="left")
+        key_var = tk.StringVar(value=_KEY_PLACEHOLDER)
+        key_entry = ttk.Entry(row1, textvariable=key_var, width=16, justify="center",
+                              font=("微软雅黑", 10))
+        key_entry.pack(side="left", padx=6, ipady=2)
+        tk.Label(row1, text="  键盘动作").pack(side="left")
+        a_var = tk.StringVar(value="单击(按下+松开)")
+        ttk.Combobox(row1, textvariable=a_var, width=14, state="readonly",
+                     values=list(ACTIONS)).pack(side="left", padx=6)
+
+        row2 = tk.Frame(body)
+        row2.pack(fill="x", pady=4)
+        tk.Label(row2, text="同时按下键盘").pack(side="left")
+        _, mod_vars = _mods_grid(row2)
+
+        row3 = tk.Frame(body)
+        row3.pack(fill="x", pady=6)
+        tk.Label(row3, text="执行次数:").pack(side="left")
+        times = tk.StringVar(value="1")
+        ttk.Spinbox(row3, from_=0, to=99, textvariable=times, width=5).pack(side="left", padx=4)
+        tk.Label(row3, text="(0~99，默认一次)").pack(side="left")
+
+        row4 = tk.Frame(body)
+        row4.pack(fill="x", pady=6)
+        tk.Label(row4, text="延迟").pack(side="left")
+        delay = tk.StringVar(value="30")
+        ttk.Spinbox(row4, from_=0, to=600000, textvariable=delay, width=7).pack(side="left")
+        tk.Label(row4, text=" 毫秒后执行下一个动作; (1000毫秒等于1秒)").pack(side="left")
+
+        def on_key(e):
+            name = keysym_to_name(e.keysym)
+            if name:
+                key_entry.config(foreground="black")
+                key_var.set(name)
+            return "break"
+
+        def on_focus_in(e):
+            if key_var.get() == _KEY_PLACEHOLDER:
+                key_var.set("")
+
+        key_entry.bind("<KeyPress>", on_key)
+        key_entry.bind("<FocusIn>", on_focus_in)
+
+        def on_ok():
+            key = key_var.get().strip()
+            if not key or key == _KEY_PLACEHOLDER:
+                messagebox.showwarning("键盘点击", "请先点进「键盘按键」框，直接按下一个键", parent=dlg)
+                return
+            dlg.result = {"kind": "keypress", "key": key,
+                          "action": ACTIONS[a_var.get()], "mods": _mods_selected(mod_vars),
                           "times": max(0, _num(times.get(), 1)),
                           "delay": max(0, _num(delay.get(), 30))}
             dlg.destroy()
@@ -362,6 +485,12 @@ class ScriptEditor(tk.Toplevel):
             return "等待", f"{a['ms']} 毫秒"
         if kind == "mod":
             return f"键盘{MOD_CN[a['name']]}", "按下" if a["phase"] == "down" else "松开"
+        if kind == "keypress":
+            extra = ""
+            if a["mods"]:
+                extra = " 同时按下 " + "、".join(MOD_CN[m] for m in a["mods"])
+            return (f"键盘[{a['key']}]{_KEYPRESS_CN[a['action']]}",
+                    f"执行{a['times']}次{extra}  延迟{a['delay']}毫秒")
         if kind == "click":
             extra = ""
             if a["mods"]:

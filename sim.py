@@ -57,6 +57,26 @@ VK_ESCAPE = 0x1B
 # 修饰键统一用左侧虚拟键码（"同时按下键盘"勾选左右都执行左键）
 VK_MOD = {"ctrl": 0xA2, "shift": 0xA0, "alt": 0xA4, "win": 0x5B}
 
+# 键盘点击的键名 → 虚拟键码
+KEY_VK = {
+    "回车": 0x0D, "Tab": 0x09, "空格": 0x20, "退格": 0x08, "删除": 0x2E,
+    "Esc": 0x1B, "上": 0x26, "下": 0x28, "左": 0x25, "右": 0x27,
+    "Home": 0x24, "End": 0x23, "上翻页": 0x21, "下翻页": 0x22,
+}
+KEY_VK.update({f"F{i}": 0x6F + i for i in range(1, 13)})
+KEY_VK.update({f"小键盘{i}": 0x60 + i for i in range(10)})
+
+
+def key_vk(name):
+    """键名 → 虚拟键码；单字符按字母/数字处理；未知返回 None。"""
+    if name in KEY_VK:
+        return KEY_VK[name]
+    if len(name) == 1:
+        ch = name.upper()
+        if "0" <= ch <= "9" or "A" <= ch <= "Z":
+            return ord(ch)
+    return None
+
 
 class KBDLLHOOKSTRUCT(ctypes.Structure):
     _fields_ = [("vkCode", wintypes.DWORD), ("scanCode", wintypes.DWORD),
@@ -165,6 +185,18 @@ def exec_actions(actions, stop):
             mouse_up(act[1])
         elif kind == "mod":
             (mod_down if act[2] == "down" else mod_up)(act[1])
+        elif kind == "keypress":
+            vk = key_vk(act[1])
+            if vk is None:
+                continue
+            if act[2] == "down":
+                key_down(vk)
+            elif act[2] == "up":
+                key_up(vk)
+            else:  # click（含 double 展开成的两次 click）
+                key_down(vk)
+                time.sleep(0.03)
+                key_up(vk)
         elif kind == "key":
             (key_down if act[2] == "down" else key_up)(act[1])
         elif kind == "wait":

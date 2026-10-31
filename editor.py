@@ -126,7 +126,8 @@ def pick_position(parent, hide=()):
 
 
 def _make_dialog(parent, title, tip):
-    """通用模态对话框骨架，返回 (dlg, body_frame, btn_row)。"""
+    """通用模态对话框骨架，返回 (dlg, body_frame, btn_row)。
+    调用方加完控件后用 ScriptEditor._show_dialog 居中弹出。"""
     dlg = tk.Toplevel(parent)
     dlg.title(title)
     dlg.resizable(False, False)
@@ -257,6 +258,17 @@ class ScriptEditor(tk.Toplevel):
             base = os.path.splitext(os.path.basename(self.source_path))[0]
         return base
 
+    def _show_dialog(self, dlg):
+        """屏幕居中弹出模态对话框并等待结果。"""
+        dlg.update_idletasks()
+        w = max(dlg.winfo_reqwidth(), 1)
+        h = max(dlg.winfo_reqheight(), 1)
+        x = (dlg.winfo_screenwidth() - w) // 2
+        y = (dlg.winfo_screenheight() - h) // 2
+        dlg.geometry(f"+{x}+{y}")
+        self.wait_window(dlg)
+        return dlg.result
+
     # ---------- 添加动作 ----------
     def _add_action(self, kind, button, action):
         if kind == "move":
@@ -310,9 +322,7 @@ class ScriptEditor(tk.Toplevel):
         ttk.Button(btn_row, text="取消", command=dlg.destroy).pack(side="right", padx=6)
         ttk.Button(btn_row, text="确定", style="Blue.TButton",
                    command=on_ok).pack(side="right", padx=6)
-        dlg.result = None
-        self.wait_window(dlg)
-        return dlg.result
+        return self._show_dialog(dlg)
 
     def _dialog_wait(self):
         dlg, body, btn_row = _make_dialog(
@@ -331,9 +341,7 @@ class ScriptEditor(tk.Toplevel):
         ttk.Button(btn_row, text="取消", command=dlg.destroy).pack(side="right", padx=6)
         ttk.Button(btn_row, text="确定", style="Blue.TButton",
                    command=on_ok).pack(side="right", padx=6)
-        dlg.result = None
-        self.wait_window(dlg)
-        return dlg.result
+        return self._show_dialog(dlg)
 
     def _dialog_click(self, button, action):
         dlg, body, btn_row = _make_dialog(self, "鼠标点击", "点击鼠标所在位置")
@@ -378,9 +386,7 @@ class ScriptEditor(tk.Toplevel):
         ttk.Button(btn_row, text="取消", command=dlg.destroy).pack(side="right", padx=6)
         ttk.Button(btn_row, text="确定", style="Blue.TButton",
                    command=on_ok).pack(side="right", padx=6)
-        dlg.result = None
-        self.wait_window(dlg)
-        return dlg.result
+        return self._show_dialog(dlg)
 
     def _dialog_keypress(self):
         dlg, body, btn_row = _make_dialog(
@@ -444,9 +450,7 @@ class ScriptEditor(tk.Toplevel):
         ttk.Button(btn_row, text="取消", command=dlg.destroy).pack(side="right", padx=6)
         ttk.Button(btn_row, text="确定", style="Blue.TButton",
                    command=on_ok).pack(side="right", padx=6)
-        dlg.result = None
-        self.wait_window(dlg)
-        return dlg.result
+        return self._show_dialog(dlg)
 
     def _dialog_type(self):
         dlg, body, btn_row = _make_dialog(self, "输入文字", "把一串文字输入到当前光标所在位置（支持中文）")
@@ -484,9 +488,7 @@ class ScriptEditor(tk.Toplevel):
         ttk.Button(btn_row, text="取消", command=dlg.destroy).pack(side="right", padx=6)
         ttk.Button(btn_row, text="确定", style="Blue.TButton",
                    command=on_ok).pack(side="right", padx=6)
-        dlg.result = None
-        self.wait_window(dlg)
-        return dlg.result
+        return self._show_dialog(dlg)
 
     # ---------- 表格 ----------
     def _refresh(self):

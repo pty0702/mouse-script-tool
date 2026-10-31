@@ -27,7 +27,7 @@ import editor
 APP_TITLE = "鼠标脚本工具"
 # 水印：标题栏与激活窗口统一带作者标识
 APP_TITLE_LABELED = "鼠标脚本工具 by 西塔 | ptyo7o2"
-ABOUT_TEXT = "鼠标脚本工具 v1.3\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
+ABOUT_TEXT = "鼠标脚本工具 v1.4\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
 
 # 程序目录：打包成 exe 后取 exe 所在目录，脚本状态下取 py 文件目录
 if getattr(sys, "frozen", False):
@@ -37,9 +37,9 @@ else:
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 SCRIPTS_DIR = os.path.join(BASE_DIR, "脚本")
 
-COLOR_KEYS = ("black", "red", "green")
-COLOR_FG = {"black": "#333333", "red": "#E53935", "green": "#0B8A3C"}
-COLOR_NAMES = {"black": "默认黑", "red": "红色(账号)", "green": "绿色(密码)"}
+COLOR_KEYS = ("black", "red", "green", "blue")
+COLOR_FG = {"black": "#333333", "red": "#E53935", "green": "#0B8A3C", "blue": "#1565C0"}
+COLOR_NAMES = {"black": "默认黑", "red": "红色", "green": "绿色", "blue": "蓝色"}
 
 
 
@@ -117,7 +117,6 @@ class App:
         self.menu.add_command(label="⚙ 编辑脚本", command=lambda: self.edit_script(self._menu_index))
         self.menu.add_command(label="✏ 重命名", command=lambda: self.rename_item(self._menu_index))
         self.menu.add_command(label="📂 打开所在文件夹", command=lambda: self.open_folder(self._menu_index))
-        self.menu.add_command(label="📄 复制内容到剪贴板", command=lambda: self.copy_item(self._menu_index))
         self.menu.add_separator()
         self.menu.add_command(label="↑ 上移", command=lambda: self.move_item(self._menu_index, -1))
         self.menu.add_command(label="↓ 下移", command=lambda: self.move_item(self._menu_index, 1))
@@ -147,7 +146,6 @@ class App:
         self.run_btn.pack(side="right", padx=(0, 10))
 
         self.tree.bind("<Button-1>", self._on_click)
-        self.tree.bind("<Double-1>", self._on_double_click)
         self.tree.bind("<Button-3>", self._on_right_click)
 
     # ---------- 列表 ----------
@@ -173,11 +171,6 @@ class App:
             self._save_config()
         elif col == "#4":                     # 操作列 → 弹菜单
             self._show_menu(int(row), event)
-
-    def _on_double_click(self, event):
-        row = self.tree.identify_row(event.y)
-        if row:
-            self.copy_item(int(row))
 
     def _on_right_click(self, event):
         row = self.tree.identify_row(event.y)
@@ -269,18 +262,6 @@ class App:
     def open_folder(self, index):
         if 0 <= index < len(self.items):
             os.startfile(os.path.dirname(self.items[index]["path"]))
-
-    def copy_item(self, index):
-        """双击/右键复制：把该脚本"输入"的内容放进剪贴板。"""
-        if not (0 <= index < len(self.items)):
-            return
-        it = self.items[index]
-        raw = scriptfmt.read_text(it["path"])
-        actions, _ = scriptfmt.parse(raw)
-        text = scriptfmt.extract_copy_text(actions, raw)
-        self.root.clipboard_clear()
-        self.root.clipboard_append(text)
-        self._set_status(f"已复制「{it['name']}」的内容到剪贴板（{len(text)} 字）— 去 Ctrl+V 粘贴")
 
     def on_new_script(self):
         """F9 /「创建鼠标宏」：打开脚本编辑窗口（点添加、弹框填参数做脚本）。"""

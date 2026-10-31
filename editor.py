@@ -133,6 +133,7 @@ def _make_dialog(parent, title, tip):
     dlg.resizable(False, False)
     dlg.transient(parent.winfo_toplevel())
     dlg.grab_set()
+    dlg.result = None   # 任何关闭路径（确定/取消/点✕）都有默认值
     tk.Label(dlg, text="ⓘ " + tip, fg="#666666",
              font=("微软雅黑", 9)).pack(anchor="w", padx=16, pady=(14, 4))
     body = tk.Frame(dlg)
@@ -152,8 +153,9 @@ def _mods_grid(parent, start_row=0):
         for c, name in enumerate(pair):
             v = tk.StringVar(value="0")
             ttk.Checkbutton(grid, text=name, variable=v,
-                            onvalue="1", offvalue="0").grid(
-                row=r, column=c, sticky="w", padx=8, pady=1)
+                            onvalue="1", offvalue="0",
+                            style="Big.TCheckbutton").grid(
+                row=r, column=c, sticky="w", padx=10, pady=3)
             mod_vars[name] = v
     return grid, mod_vars
 
@@ -171,6 +173,7 @@ class ScriptEditor(tk.Toplevel):
         self.geometry("920x580")
         self.minsize(820, 500)
 
+        self._build_style()
         self.on_saved = on_saved
         self.source_path = source_path
         self.scripts_dir = scripts_dir
@@ -184,6 +187,16 @@ class ScriptEditor(tk.Toplevel):
             self._load_source(source_path)
 
     # ---------- 界面 ----------
+    def _build_style(self):
+        """编辑器内控件样式：加大的复选框（勾选框 20px + 11 号字）。"""
+        style = ttk.Style(self)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure("Big.TCheckbutton", font=("微软雅黑", 11),
+                        indicatorsize=20, indicatormargin=(0, 0, 6, 0))
+
     def _build_left(self):
         left = tk.Frame(self, width=210)
         left.pack(side="left", fill="y", padx=(8, 4), pady=8)
@@ -267,7 +280,7 @@ class ScriptEditor(tk.Toplevel):
         y = (dlg.winfo_screenheight() - h) // 2
         dlg.geometry(f"+{x}+{y}")
         self.wait_window(dlg)
-        return dlg.result
+        return getattr(dlg, "result", None)
 
     # ---------- 添加动作 ----------
     def _add_action(self, kind, button, action):

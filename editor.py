@@ -298,7 +298,7 @@ class ScriptEditor(tk.Toplevel):
             dlg = self._dialog_type()
         if dlg is not None:
             self.actions.append(dlg)
-            self._refresh()
+            self._refresh(scroll_last=True)
 
     def _dialog_move(self):
         dlg, body, btn_row = _make_dialog(self, "鼠标移动", "将鼠标移动到指定位置")
@@ -510,12 +510,14 @@ class ScriptEditor(tk.Toplevel):
         return self._show_dialog(dlg)
 
     # ---------- 表格 ----------
-    def _refresh(self):
+    def _refresh(self, scroll_last=False):
         self.tree.delete(*self.tree.get_children())
         for i, a in enumerate(self.actions, 1):
             self.tree.insert("", "end", iid=str(i - 1),
                              values=(i, *self._display(a), "📄", "🗑"))
         self.count_var.set(f"当前动作数: {len(self.actions)}")
+        if scroll_last and self.actions:
+            self.tree.see(str(len(self.actions) - 1))   # 自动翻到最新一行
 
     @staticmethod
     def _display(a):
@@ -554,7 +556,7 @@ class ScriptEditor(tk.Toplevel):
             self._refresh()
         elif col == "#4":   # 📄 复制该动作，追加到列表末尾
             self.actions.append(dict(self.actions[int(row)]))
-            self._refresh()
+            self._refresh(scroll_last=True)
             self.status_var.set(f"已复制第 {int(row) + 1} 步到列表末尾")
 
     def on_clear(self):

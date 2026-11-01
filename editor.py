@@ -117,7 +117,9 @@ def pick_position(parent, hide=()):
         ov.grab_set()
         parent.wait_window(ov)
     finally:
-        for w in hidden:
+        # 倒序恢复：最后恢复的窗口叠在最上面（hide 顺序是对话框→编辑器→主界面，
+        # 反过来恢复让对话框最后映射、位于顶层，不会被编辑器盖住）
+        for w in reversed(hidden):
             try:
                 w.deiconify()
             except tk.TclError:
@@ -311,7 +313,11 @@ class ScriptEditor(tk.Toplevel):
         def do_pick():
             # 选取期间隐藏对话框、编辑器与主窗口，避免挡住要选的位置
             pos = pick_position(dlg, hide=(dlg, self, self.master))
-            dlg.grab_set()   # 选完恢复对话框的模态
+            # 恢复后强制把对话框拉到最前、重新接管模态与焦点，
+            # 否则它可能被编辑器压在下面，模态占用导致界面像卡死
+            dlg.grab_set()
+            dlg.lift()
+            dlg.focus_set()
             if pos:
                 x_var.set(str(pos[0]))
                 y_var.set(str(pos[1]))

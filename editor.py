@@ -106,8 +106,13 @@ def pick_position(parent, hide=()):
         pos_lbl.config(text=f"X: {e.x_root}   Y: {e.y_root}")
 
     def on_click(e):
+        if result["pos"] is not None:
+            return                     # 已选过：吞掉手快的多余点击
         result["pos"] = (e.x_root, e.y_root)
-        ov.destroy()
+        ov.unbind("<Button-1>")
+        ov.configure(cursor="watch")
+        ov.after(250, ov.destroy)      # 延迟销毁：吃掉手快双击的第二击，
+                                        # 防止穿透到刚恢复的弹框上误按取消/关闭
 
     ov.bind("<Motion>", on_move)
     ov.bind("<Button-1>", on_click)
@@ -273,6 +278,42 @@ class ScriptEditor(tk.Toplevel):
             base = os.path.splitext(os.path.basename(self.source_path))[0]
         return base
 
+    def _in_screen(self, dlg):
+        """弹框是否完整落在屏幕内（允许 8px 越界）。"""
+        sw, sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+        x, y = dlg.winfo_x(), dlg.winfo_y()
+        w, h = dlg.winfo_width(), dlg.winfo_height()
+        return -8 <= x and -8 <= y and x + w <= sw + 8 and y + h <= sh + 8
+
+    def _ensure_dialog_visible(self, dlg):
+        """恢复弹框并自愈：直到它可见、居中、持有模态为止。
+        某些环境（高 DPI/双屏/点击穿透）下 WM 会吃掉 deiconify，
+        常规一次恢复可能失效，这里轮询最多 5 次强制救回。"""
+        def attempt(n=0):
+            if not dlg.winfo_exists():
+                return
+            if dlg.winfo_viewable() and self._in_screen(dlg):
+                self._center_dialog(dlg)
+                dlg.grab_set()
+                dlg.lift()
+                dlg.focus_set()
+                return
+            if n >= 5:
+                dlg.deiconify()
+                dlg.attributes("-topmost", True)
+                dlg.attributes("-topmost", False)
+                self._center_dialog(dlg)
+                dlg.grab_set()
+                dlg.focus_set()
+                return
+            dlg.deiconify()
+            dlg.attributes("-topmost", True)
+            dlg.attributes("-topmost", False)
+            dlg.lift()
+            self._center_dialog(dlg)
+            dlg.after(120, lambda: attempt(n + 1))
+        attempt()
+
     def _center_dialog(self, dlg):
         """把对话框移动到屏幕正中（恢复后 WM 可能把窗口丢到屏幕边缘）。"""
         dlg.update_idletasks()
@@ -317,12 +358,8 @@ class ScriptEditor(tk.Toplevel):
         def do_pick():
             # 选取期间隐藏对话框、编辑器与主窗口，避免挡住要选的位置
             pos = pick_position(dlg, hide=(dlg, self, self.master))
-            # WM 在 withdraw/deiconify 后可能把窗口丢到屏幕边缘/压到编辑器下面，
-            # 重新移回屏幕正中、置顶并归还模态与焦点
-            self._center_dialog(dlg)
-            dlg.grab_set()
-            dlg.lift()
-            dlg.focus_set()
+            # 恢复并自愈：确保弹框回到屏幕正中、置顶、持有模态
+            self._ensure_dialog_visible(dlg)
             if pos:
                 x_var.set(str(pos[0]))
                 y_var.set(str(pos[1]))

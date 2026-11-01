@@ -25,6 +25,7 @@ BUTTONS = {"鼠标左键": "left", "鼠标中键": "middle", "鼠标右键": "ri
 ACTION_CN = {"click": "单击(按下+松开)", "down": "按下", "up": "松开", "double": "双击"}
 ACTIONS = {"click": "click", "down": "down", "up": "up", "double": "double"}
 ACTION_BY_CN = {v: k for k, v in ACTION_CN.items()}   # 下拉框中文显示 → 内部值
+_KEYPRESS_CN = {"click": "单击", "double": "双击", "down": "按下", "up": "松开"}
 
 # 左侧操作列表：分组 → (显示名, kind, button, action)
 OP_GROUPS = [
@@ -331,16 +332,20 @@ class ScriptEditor(tk.Toplevel):
 
     # ---------- 添加动作 ----------
     def _add_action(self, kind, button, action):
-        if kind == "move":
-            dlg = self._dialog_move()
-        elif kind == "wait":
-            dlg = self._dialog_wait()
-        elif kind == "click":
-            dlg = self._dialog_click(button, action)
-        elif kind == "keypress":
-            dlg = self._dialog_keypress()
-        else:
-            dlg = self._dialog_type()
+        try:
+            if kind == "move":
+                dlg = self._dialog_move()
+            elif kind == "wait":
+                dlg = self._dialog_wait()
+            elif kind == "click":
+                dlg = self._dialog_click(button, action)
+            elif kind == "keypress":
+                dlg = self._dialog_keypress()
+            else:
+                dlg = self._dialog_type()
+        except Exception as e:      # 兜底：任何弹框异常都不让编辑器卡死
+            messagebox.showerror("脚本编辑", f"添加动作出错：{e}")
+            return
         if dlg is not None:
             self.actions.append(dlg)
             self._refresh(scroll_last=True)
@@ -456,9 +461,20 @@ class ScriptEditor(tk.Toplevel):
         row1.pack(fill="x", pady=6)
         tk.Label(row1, text="键盘按键").pack(side="left")
         key_var = tk.StringVar(value=_KEY_PLACEHOLDER)
-        key_entry = ttk.Entry(row1, textvariable=key_var, width=16, justify="center",
+        key_entry = ttk.Entry(row1, textvariable=key_var, width=14, justify="center",
                               font=("微软雅黑", 10))
         key_entry.pack(side="left", padx=6, ipady=2)
+        tk.Label(row1, text="  或点选").pack(side="left")
+        common_keys = ["回车", "Tab", "空格", "退格", "删除", "Esc",
+                       "上", "下", "左", "右", "Home", "End", "上翻页", "下翻页",
+                       *(f"F{i}" for i in range(1, 13)),
+                       *(f"小键盘{i}" for i in range(10)),
+                       *(chr(c) for c in range(ord("A"), ord("Z") + 1)),
+                       *(str(d) for d in range(10))]
+        key_box = ttk.Combobox(row1, width=8, state="readonly", values=common_keys)
+        key_box.pack(side="left", padx=6)
+        key_box.bind("<<ComboboxSelected>>", lambda e: (
+            key_entry.config(foreground="black"), key_var.set(key_box.get())))
         tk.Label(row1, text="  键盘动作").pack(side="left")
         a_var = tk.StringVar(value="单击(按下+松开)")
         ttk.Combobox(row1, textvariable=a_var, width=14, state="readonly",
@@ -488,7 +504,14 @@ class ScriptEditor(tk.Toplevel):
             if name:
                 key_entry.config(foreground="black")
                 key_var.set(name)
-            return "break"
+                return "break"
+            # 框为空时按回车：直接当作捕获"回车"，不触发确定
+            if e.keysym == "Return" and not key_var.get().strip():
+                key_entry.config(foreground="black")
+                key_var.set("回车")
+                return "break"
+            return "break"      # 其余键（含已捕获后的回车/Tab）一律吞掉，
+                                # 防止触发焦点环上按钮的默认激活抢走焦点
 
         def on_focus_in(e):
             if key_var.get() == _KEY_PLACEHOLDER:
@@ -498,9 +521,13 @@ class ScriptEditor(tk.Toplevel):
         key_entry.bind("<FocusIn>", on_focus_in)
 
         def on_ok():
-            key = key_var.get().strip()
+            # 实时读取：捕获框值 + 点选下拉当前值（谁有效用谁，点选优先）
+            key = key_box.get().strip() or key_var.get().strip()
             if not key or key == _KEY_PLACEHOLDER:
-                messagebox.showwarning("键盘点击", "请先点进「键盘按键」框，直接按下一个键", parent=dlg)
+                # 空框：提示后把焦点还给捕获框（不破坏 grab/焦点链）
+                messagebox.showwarning("键盘点击", "请点进「键盘按键」框按一个键，或在右边点选常用键",
+                                       parent=dlg)
+                key_entry.focus_set()
                 return
             dlg.result = {"kind": "keypress", "key": key,
                           "action": ACTION_BY_CN[a_var.get()], "mods": _mods_selected(mod_vars),
@@ -509,8 +536,17 @@ class ScriptEditor(tk.Toplevel):
             dlg.destroy()
 
         ttk.Button(btn_row, text="取消", command=dlg.destroy).pack(side="right", padx=6)
-        ttk.Button(btn_row, text="确定", style="Blue.TButton",
-                   command=on_ok).pack(side="right", padx=6)
+        ok_btn = ttk.Button(btn_row, text="确定", style="Blue.TButton", command=on_ok)
+        ok_btn.pack(side="right", padx=6)
+        # 弹窗关闭时确保释放模态，避免任何关闭路径残留 grab 导致后续添加失效
+        def _release_grab(event):
+            if event.widget is dlg:
+                try:
+                    dlg.grab_release()
+                except tk.TclError:
+                    pass
+        dlg.bind("<Destroy>", _release_grab)
+        key_entry.focus_set()      # 初始焦点在捕获框，用户直接按键即可
         return self._show_dialog(dlg)
 
     def _dialog_type(self):

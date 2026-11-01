@@ -13,6 +13,7 @@
 import json
 import os
 import queue
+import shutil
 import sys
 import threading
 import time
@@ -27,7 +28,7 @@ import editor
 APP_TITLE = "鼠标脚本工具"
 # 水印：标题栏与激活窗口统一带作者标识
 APP_TITLE_LABELED = "鼠标脚本工具 by 西塔 | ptyo7o2"
-ABOUT_TEXT = "鼠标脚本工具 v1.8\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
+ABOUT_TEXT = "鼠标脚本工具 v1.9\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
 
 # 程序目录：打包成 exe 后取 exe 所在目录，脚本状态下取 py 文件目录
 if getattr(sys, "frozen", False):
@@ -58,10 +59,13 @@ class App:
         self.running = False
         self.play_count = tk.StringVar(value="1")
         self.count_mode = tk.StringVar(value="自定义次数")
+        self.icon_name = None       # 用户自定义图标文件名（appicon.ico/png）
+        self._icon_img = None       # PhotoImage 引用防垃圾回收
 
         self._build_style()
         self._build_ui()
         self._load_config()
+        self._apply_icon()
         self._refresh_tree()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -88,6 +92,8 @@ class App:
         top.pack(fill="x")
         ttk.Button(top, text="📥 导入", style="Blue.TButton",
                    command=self.on_import).pack(side="left")
+        ttk.Button(top, text="🖼 换图标",
+                   command=self.on_change_icon).pack(side="left", padx=(8, 0))
         ttk.Button(top, text="🗑 清空", command=self.on_clear).pack(side="right")
 
         columns = ("chk", "name", "path", "ops")
@@ -204,6 +210,71 @@ class App:
             self._refresh_tree()
             self._save_config()
 
+    # ---------- 自定义图标 ----------
+    def on_change_icon(self):
+        """用户自己选择 .ico/.png 图标文件，复制到程序目录并立即生效。"""
+        p = filedialog.askopenfilename(
+            parent=self.root, title="选择图标文件（.ico 或 .png）",
+            filetypes=[("图标文件", "*.ico *.png"), ("所有文件", "*.*")])
+        if not p:
+            return
+        ext = os.path.splitext(p)[1].lower()
+        if ext not in (".ico", ".png"):
+            messagebox.showwarning(APP_TITLE, "请选择 .ico 或 .png 格式的图标文件")
+            return
+        target = os.path.join(BASE_DIR, "appicon" + ext)
+        try:
+            shutil.copyfile(p, target)
+        except OSError as e:
+            messagebox.showerror(APP_TITLE, f"保存图标失败：{e}")
+            return
+        other = "appicon.ico" if ext == ".png" else "appicon.png"
+        try:
+            os.remove(os.path.join(BASE_DIR, other))
+        except OSError:
+            pass
+        self.icon_name = "appicon" + ext
+        self._apply_icon()
+        self._save_config()
+        self._set_status("图标已更换。想恢复默认：删除程序目录下的 appicon 文件后重启软件")
+
+    def _all_toplevels(self):
+        """主窗口 + 所有已打开的 Toplevel（编辑器、弹框等）。"""
+        wins = [self.root]
+
+        def walk(w):
+            for c in w.winfo_children():
+                if isinstance(c, tk.Toplevel):
+                    wins.append(c)
+                walk(c)
+        walk(self.root)
+        return wins
+
+    def _apply_icon(self):
+        """把用户自定义图标应用到全部窗口（ico 用 iconbitmap，png 用 iconphoto）。"""
+        if not self.icon_name:
+            return
+        path = os.path.join(BASE_DIR, self.icon_name)
+        if not os.path.exists(path):
+            return
+        try:
+            if self.icon_name.lower().endswith(".ico"):
+                for w in self._all_toplevels():
+                    try:
+                        w.iconbitmap(path)
+                    except tk.TclError:
+                        pass
+            else:
+                img = tk.PhotoImage(file=path)
+                self._icon_img = img       # 防垃圾回收
+                for w in self._all_toplevels():
+                    try:
+                        w.iconphoto(False, img)
+                    except tk.TclError:
+                        pass
+        except tk.TclError:
+            pass
+
     def remove_item(self, index):
         if 0 <= index < len(self.items):
             self.items.pop(index)
@@ -227,9 +298,10 @@ class App:
         """右键「编辑脚本」：优先用脚本编辑窗口打开（编辑保存直接覆盖原文件）。"""
         if not (0 <= index < len(self.items)):
             return
-        editor.ScriptEditor(self.root, on_saved=self._on_editor_saved,
-                            source_path=self.items[index]["path"],
-                            scripts_dir=SCRIPTS_DIR)
+        ed = editor.ScriptEditor(self.root, on_saved=self._on_editor_saved,
+                                 source_path=self.items[index]["path"],
+                                 scripts_dir=SCRIPTS_DIR)
+        self._apply_icon()   # 编辑器是新建 Toplevel，补设自定义图标
 
     def rename_item(self, index):
         """重命名：列表显示与磁盘文件一起改。"""
@@ -265,8 +337,9 @@ class App:
 
     def on_new_script(self):
         """F9 /「创建鼠标宏」：打开脚本编辑窗口（点添加、弹框填参数做脚本）。"""
-        editor.ScriptEditor(self.root, on_saved=self._on_editor_saved,
-                            scripts_dir=SCRIPTS_DIR)
+        ed = editor.ScriptEditor(self.root, on_saved=self._on_editor_saved,
+                                 scripts_dir=SCRIPTS_DIR)
+        self._apply_icon()   # 编辑器是新建 Toplevel，补设自定义图标
 
     def _on_editor_saved(self, path):
         """编辑器保存后刷新主界面列表：已有则更新名称，否则新增。"""
@@ -356,13 +429,16 @@ class App:
             self.items = cfg.get("items", [])
             self.count_mode.set(cfg.get("count_mode", "自定义次数"))
             self.play_count.set(str(cfg.get("play_count", 1)))
+            if cfg.get("icon"):
+                self.icon_name = cfg["icon"]
         except (OSError, ValueError, json.JSONDecodeError):
             pass
 
     def _save_config(self):
         cfg = {"items": self.items,
                "count_mode": self.count_mode.get(),
-               "play_count": self.play_count.get()}
+               "play_count": self.play_count.get(),
+               "icon": self.icon_name}
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, ensure_ascii=False, indent=2)

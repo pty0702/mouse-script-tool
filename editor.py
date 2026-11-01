@@ -273,14 +273,18 @@ class ScriptEditor(tk.Toplevel):
             base = os.path.splitext(os.path.basename(self.source_path))[0]
         return base
 
-    def _show_dialog(self, dlg):
-        """屏幕居中弹出模态对话框并等待结果。"""
+    def _center_dialog(self, dlg):
+        """把对话框移动到屏幕正中（恢复后 WM 可能把窗口丢到屏幕边缘）。"""
         dlg.update_idletasks()
         w = max(dlg.winfo_reqwidth(), 1)
         h = max(dlg.winfo_reqheight(), 1)
         x = (dlg.winfo_screenwidth() - w) // 2
         y = (dlg.winfo_screenheight() - h) // 2
         dlg.geometry(f"+{x}+{y}")
+
+    def _show_dialog(self, dlg):
+        """屏幕居中弹出模态对话框并等待结果。"""
+        self._center_dialog(dlg)
         self.wait_window(dlg)
         return getattr(dlg, "result", None)
 
@@ -313,8 +317,9 @@ class ScriptEditor(tk.Toplevel):
         def do_pick():
             # 选取期间隐藏对话框、编辑器与主窗口，避免挡住要选的位置
             pos = pick_position(dlg, hide=(dlg, self, self.master))
-            # 恢复后强制把对话框拉到最前、重新接管模态与焦点，
-            # 否则它可能被编辑器压在下面，模态占用导致界面像卡死
+            # WM 在 withdraw/deiconify 后可能把窗口丢到屏幕边缘/压到编辑器下面，
+            # 重新移回屏幕正中、置顶并归还模态与焦点
+            self._center_dialog(dlg)
             dlg.grab_set()
             dlg.lift()
             dlg.focus_set()

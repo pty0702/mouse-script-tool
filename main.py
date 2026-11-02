@@ -566,6 +566,9 @@ class App:
         self.root.destroy()
 
 
+REQUIRE_LICENSE = True   # 卡密验证开关；打包"完整/纯净版"时临时置 False（build.ps1 -Full 自动处理）
+
+
 def main():
     # DPI 感知：高缩放屏幕（125%/150%）下让遮罩真正全屏、坐标不虚拟化
     try:
@@ -575,7 +578,8 @@ def main():
         pass
     root = tk.Tk()
     root.withdraw()
-    if not license_client.gate(root, os.path.join(BASE_DIR, "license.json")):
+    if REQUIRE_LICENSE and not license_client.gate(
+            root, os.path.join(BASE_DIR, "license.json")):
         root.destroy()
         return
     root.deiconify()

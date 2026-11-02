@@ -16,3 +16,4 @@ config.json
 
 # 工作过程临时目录
 artifacts/tmp/
+dist_full/

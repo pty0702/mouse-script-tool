@@ -28,7 +28,7 @@ import editor
 APP_TITLE = "鼠标脚本工具"
 # 水印：标题栏与激活窗口统一带作者标识
 APP_TITLE_LABELED = "鼠标脚本工具 by 西塔 | ptyo7o2"
-ABOUT_TEXT = "鼠标脚本工具 v2.2\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
+ABOUT_TEXT = "鼠标脚本工具 v2.3\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
 
 # 程序目录：打包成 exe 后取 exe 所在目录，脚本状态下取 py 文件目录
 if getattr(sys, "frozen", False):
@@ -368,11 +368,28 @@ class App:
 
     # ---------- 运行 ----------
     def on_run(self):
+        try:
+            self._on_run_inner()
+        except Exception as e:      # 兜底：任何异常都可见，绝不静默"没反应"
+            self._flash_main()
+            self._set_status(f"运行出错：{e}")
+            try:
+                messagebox.showerror(APP_TITLE, f"运行出错：{e}", parent=self.root)
+            except tk.TclError:
+                pass
+
+    def _on_run_inner(self):
         if self.running:
+            self._flash_main()
+            self._set_status("已在运行中 — 再按一次 F10 停止")
             return
         checked = [it for it in self.items if it["checked"]]
         if not checked:
-            messagebox.showinfo(APP_TITLE, "请先勾选要运行的脚本")
+            # 先把主界面弹到最前再提示，否则在别的窗口按 F10 时
+            # 提示会被压在后台，看起来像"没反应"
+            self._flash_main()
+            self._set_status("未运行：请先勾选脚本前的 ✅")
+            messagebox.showinfo(APP_TITLE, "请先勾选要运行的脚本", parent=self.root)
             return
         if self.count_mode.get() == "无限循环":
             count = None
@@ -380,7 +397,9 @@ class App:
             try:
                 count = max(1, int(self.play_count.get()))
             except ValueError:
-                messagebox.showwarning(APP_TITLE, "回放次数请填数字")
+                self._flash_main()
+                self._set_status("未运行：回放次数请填数字")
+                messagebox.showwarning(APP_TITLE, "回放次数请填数字", parent=self.root)
                 return
 
         scripts = []
@@ -392,7 +411,11 @@ class App:
         self.stop_flag.clear()
         self.running = True
         self.run_btn.configure(text="⏹ 停止(F10)")
-        self._create_hud()
+        self._set_status(f"开始运行：{len(checked)} 个脚本…")
+        try:
+            self._create_hud()      # 浮窗只是提醒，失败不影响运行
+        except Exception:
+            self._hud = None
         threading.Thread(target=self._worker, args=(scripts, count), daemon=True).start()
 
     # ---------- 运行浮窗与完成提醒 ----------

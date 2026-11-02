@@ -28,7 +28,7 @@ import editor
 APP_TITLE = "鼠标脚本工具"
 # 水印：标题栏与激活窗口统一带作者标识
 APP_TITLE_LABELED = "鼠标脚本工具 by 西塔 | ptyo7o2"
-ABOUT_TEXT = "鼠标脚本工具 v2.1\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
+ABOUT_TEXT = "鼠标脚本工具 v2.2\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
 
 # 程序目录：打包成 exe 后取 exe 所在目录，脚本状态下取 py 文件目录
 if getattr(sys, "frozen", False):
@@ -41,6 +41,15 @@ SCRIPTS_DIR = os.path.join(BASE_DIR, "脚本")
 COLOR_KEYS = ("black", "red", "green", "blue")
 COLOR_FG = {"black": "#333333", "red": "#E53935", "green": "#0B8A3C", "blue": "#1565C0"}
 COLOR_NAMES = {"black": "默认黑", "red": "红色", "green": "绿色", "blue": "蓝色"}
+
+
+def _topmost_off(w):
+    """取消窗口置顶（窗口可能已关闭，静默忽略）。"""
+    try:
+        if w.winfo_exists():
+            w.attributes("-topmost", False)
+    except tk.TclError:
+        pass
 
 
 
@@ -61,6 +70,8 @@ class App:
         self.count_mode = tk.StringVar(value="自定义次数")
         self.icon_name = None       # 用户自定义图标文件名（appicon.ico/png）
         self._icon_img = None       # PhotoImage 引用防垃圾回收
+        self._hud = None            # 运行中右下角提醒浮窗
+        self.hud_round = None       # 浮窗上的轮次文字
 
         self._build_style()
         self._build_ui()
@@ -381,7 +392,52 @@ class App:
         self.stop_flag.clear()
         self.running = True
         self.run_btn.configure(text="⏹ 停止(F10)")
+        self._create_hud()
         threading.Thread(target=self._worker, args=(scripts, count), daemon=True).start()
+
+    # ---------- 运行浮窗与完成提醒 ----------
+    def _create_hud(self):
+        """运行中在屏幕右下角显示置顶小浮窗，提醒停止方式。"""
+        self._destroy_hud()
+        hud = tk.Toplevel(self.root)
+        hud.overrideredirect(True)
+        hud.attributes("-topmost", True)
+        hud.configure(bg="#1F2937")
+        tk.Label(hud, text="● 运行中", font=("微软雅黑", 11, "bold"),
+                 fg="#4ADE80", bg="#1F2937").pack(padx=18, pady=(10, 2))
+        self.hud_round = tk.StringVar(value="即将开始…")
+        tk.Label(hud, textvariable=self.hud_round, font=("微软雅黑", 9),
+                 fg="#E5E7EB", bg="#1F2937").pack(padx=18)
+        tk.Label(hud, text="F10 = 停止   |   连按3次 Esc = 强制退出",
+                 font=("微软雅黑", 9), fg="#FBBF24", bg="#1F2937").pack(padx=18, pady=(4, 10))
+        hud.update_idletasks()
+        w, h = hud.winfo_reqwidth(), hud.winfo_reqheight()
+        sw, sh = hud.winfo_screenwidth(), hud.winfo_screenheight()
+        hud.geometry(f"+{sw - w - 24}+{sh - h - 80}")
+        self._hud = hud
+
+    def _destroy_hud(self):
+        hud = getattr(self, "_hud", None)
+        if hud is not None:
+            try:
+                hud.destroy()
+            except tk.TclError:
+                pass
+        self._hud = None
+
+    def _flash_main(self):
+        """主界面弹出并置顶约 2 秒，提醒运行结束/停止成功。"""
+        r = self.root
+        try:
+            if r.state() == "iconic":
+                r.deiconify()
+            r.deiconify()
+            r.lift()
+            r.focus_force()
+            r.attributes("-topmost", True)
+            r.after(2000, lambda: _topmost_off(r))
+        except tk.TclError:
+            pass
 
     def _worker(self, scripts, count):
         stop = self.stop_flag
@@ -462,10 +518,18 @@ class App:
                         self._force_exit()
                 elif kind == "status":
                     self._set_status(payload)
+                    hud = getattr(self, "_hud", None)
+                    if hud is not None and hud.winfo_exists():
+                        try:
+                            self.hud_round.set(payload)
+                        except tk.TclError:
+                            pass
                 elif kind == "done":
                     self.running = False
+                    self._destroy_hud()
                     self.run_btn.state(["!disabled"])
                     self.run_btn.configure(text="运行鼠标宏(F10)")
+                    self._flash_main()
                     self._set_status(payload + " — 就绪")
         except queue.Empty:
             pass

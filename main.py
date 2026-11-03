@@ -28,7 +28,7 @@ import editor
 APP_TITLE = "鼠标脚本工具"
 # 水印：标题栏与激活窗口统一带作者标识
 APP_TITLE_LABELED = "鼠标脚本工具 by 西塔 | ptyo7o2"
-ABOUT_TEXT = "鼠标脚本工具 v2.3\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
+ABOUT_TEXT = "鼠标脚本工具 v2.4\n\n作者：西塔\n联系方式：ptyo7o2\n\n热键：F9 编辑脚本 | F10 运行/停止\n快速连按 3 次 Esc 强制退出软件"
 
 # 程序目录：打包成 exe 后取 exe 所在目录，脚本状态下取 py 文件目录
 if getattr(sys, "frozen", False):
@@ -412,6 +412,13 @@ class App:
         self.running = True
         self.run_btn.configure(text="⏹ 停止(F10)")
         self._set_status(f"开始运行：{len(checked)} 个脚本…")
+        try:
+            # 开始运行：取消可能的置顶并最小化主界面让路
+            # （结束时会自动弹出置顶提醒；运行中可点任务栏图标查看）
+            self.root.attributes("-topmost", False)
+            self.root.iconify()
+        except tk.TclError:
+            pass
         try:
             self._create_hud()      # 浮窗只是提醒，失败不影响运行
         except Exception:
